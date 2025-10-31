@@ -28,6 +28,7 @@ if uploaded_files_np: # ファイルがアップロードされた場合のみ�
     all_df_np_raw = []
     for uploaded_file in uploaded_files_np:
         try:
+            # エンコーディングの自動判別を試みる (utf-8, shift_jis)
             df_temp = pd.read_csv(uploaded_file, encoding='utf-8')
             all_df_np_raw.append(df_temp)
         except UnicodeDecodeError:
@@ -36,10 +37,10 @@ if uploaded_files_np: # ファイルがアップロードされた場合のみ�
                 all_df_np_raw.append(df_temp)
             except Exception as e:
                 st.error(f"ファイル '{uploaded_file.name}' の読み込み中にエラーが発生しました: {e}。エンコーディングを確認してください。")
-                continue
+                continue # 次のファイルへスキップ
         except Exception as e:
             st.error(f"ファイル '{uploaded_file.name}' の読み込み中にエラーが発生しました: {e}")
-            continue
+            continue # 次のファイルへスキップ
     
     if all_df_np_raw:
         # 全てのNP掛け払いCSVを結合
@@ -56,6 +57,7 @@ if uploaded_files_np: # ファイルがアップロードされた場合のみ�
             df_np['企業名'] = '' # 存在しない場合は空の列を追加
 
         # 必須列の存在チェック
+        # '支払期限日'は元のCSVの列名。内部的にはこれを'お支払期日'にリネームする。
         required_np_columns = ['請求書発行日', '支払期限日', '請求番号', '請求金額', '入金ステータス']
         missing_np_cols = [col for col in required_np_columns if col not in df_np.columns]
         if missing_np_cols:
@@ -63,8 +65,8 @@ if uploaded_files_np: # ファイルがアップロードされた場合のみ�
             df_np = None # 処理を中断
         else:
             df_np['請求書発行日'] = pd.to_datetime(df_np['請求書発行日'], errors='coerce')
-            df_np['支払期限日'] = pd.to_datetime(df_np['支払期限日'], errors='coerce')
-            
+            df_np['支払期限日'] = pd.to_datetime(df_np['支払期限日'], errors='coerce') # 元の列名を処理
+
             # 日付変換エラーのチェック
             if df_np['請求書発行日'].isnull().any() or df_np['支払期限日'].isnull().any():
                 st.warning("NP掛け払いCSVの日付列に無効な値がありました。該当行はNaNとして処理されます。")
@@ -75,8 +77,11 @@ if uploaded_files_np: # ファイルがアップロードされた場合のみ�
             df_np['請求金額'] = pd.to_numeric(df_np['請求金額'], errors='coerce').fillna(0)
             df_np['未入金金額合計 (税込)'] = df_np.apply(lambda row: row['請求金額'] if row['入金有無'] == 'なし' else 0, axis=1)
             
-            df_np_processed = df_np[['請求書発行日', '支払期限日', '請求番号', '企業名', 'ご請求方法', '請求金額', '未入金金額合計 (税込)', '入金有無']]
+            # df_np_processed の作成時に、結合用に列名を統一
+            df_np_processed = df_np[['請求書発行日', '支払期限日', '請求番号', '企業名', 'ご請求方法', '請求金額', '未入金金額合計 (税込)', '入金有無']].copy()
             df_np_processed = df_np_processed.rename(columns={'請求金額': 'ご請求金額合計 (税込)'})
+            # ★ここが変更点★：NP掛け払いの'支払期限日'を'お支払期日'にリネームして共通化
+            df_np_processed = df_np_processed.rename(columns={'支払期限日': 'お支払期日'}) 
             
             st.subheader("NP掛け払い処理結果")
             st.dataframe(df_np_processed)
@@ -108,10 +113,10 @@ if uploaded_files_bakuraku: # ファイルがアップロードされた場合�
                 all_df_bakuraku_raw.append(df_temp)
             except Exception as e:
                 st.error(f"ファイル '{uploaded_file.name}' の読み込み中にエラーが発生しました: {e}。エンコーディングを確認してください。")
-                continue
+                continue # 次のファイルへスキップ
         except Exception as e:
             st.error(f"ファイル '{uploaded_file.name}' の読み込み中にエラーが発生しました: {e}")
-            continue
+            continue # 次のファイルへスキップ
 
     if all_df_bakuraku_raw:
         # 全てのバクラク請求書CSVを結合
@@ -148,25 +153,22 @@ if uploaded_files_bakuraku: # ファイルがアップロードされた場合�
             if df_bakuraku is not None and not df_bakuraku.empty: # データフレームが空でないことを確認
                 with st.expander("バクラク請求書一覧を開く"):
                     # ユニークなキーを生成するために、書類番号と日付、金額を組み合わせる
-                    # 表示用には重複を除去したものを利用
-                    df_bakuraku_display = df_bakuraku[['書類番号', '日付', '金額']].drop_duplicates()
-                    # 元のデータフレームのインデックスを保存しつつ、表示用の情報と紐付け
-                    df_bakuraku_display = df_bakuraku_display.merge(
-                        df_bakuraku.reset_index()[['index', '書類番号', '日付', '金額']], 
-                        on=['書類番号', '日付', '金額'], 
-                        how='left'
-                    ).set_index('index')
+                    # 表示用には重複を除去したものを利用 (同一請求を1つとして表示)
+                    # 元のdf_bakurakuのインデックスを保存するため、merge後に設定
+                    df_bakuraku_display = df_bakuraku[['書類番号', '日付', '金額']].drop_duplicates().reset_index()
 
-                    for original_idx, row in df_bakuraku_display.iterrows(): # 元のデータフレームのインデックスでループ
+                    for display_idx, row in df_bakuraku_display.iterrows():
+                        original_idx_for_display = row['index'] # この行に対応する元のdf_bakurakuのインデックス
+                        
                         # NaNの日付は表示しないか、適切に処理
                         date_str = row['日付'].strftime('%Y-%m-%d') if pd.notna(row['日付']) else '日付不明'
-                        unique_key = f"bakuraku_unpaid_{row['書類番号']}_{date_str}_{row['金額']}"
+                        unique_key = f"bakuraku_unpaid_{row['書類番号']}_{date_str}_{row['金額']}_{display_idx}"
                         
-                        # 初期状態を現在のselected_unpaid_bakurakuから設定
-                        is_checked = selected_unpaid_bakuraku.get(original_idx, False)
+                        # チェックボックスの初期状態は、この表示行に対応する最初の元のレコードの選択状態を反映
+                        is_checked = selected_unpaid_bakuraku.get(original_idx_for_display, False)
 
                         if st.checkbox(f"書類番号: {row['書類番号']}, 日付: {date_str}, 金額: {row['金額']:,}円", key=unique_key, value=is_checked):
-                            # 元のデータフレームで該当する書類番号、日付、金額のレコード全てに 'なし' を設定
+                            # この表示行に対応する全ての元のデータフレームのレコードの入金状態を更新
                             matching_indices = df_bakuraku[(df_bakuraku['書類番号'] == row['書類番号']) & 
                                                            (df_bakuraku['日付'] == row['日付']) & 
                                                            (df_bakuraku['金額'] == row['金額'])].index
@@ -177,12 +179,12 @@ if uploaded_files_bakuraku: # ファイルがアップロードされた場合�
                                                            (df_bakuraku['日付'] == row['日付']) & 
                                                            (df_bakuraku['金額'] == row['金額'])].index
                             for idx in matching_indices:
-                                # チェックが外れた場合、そのインデックスのものをFalseにする
                                 selected_unpaid_bakuraku[idx] = False
 
             # 選択結果をdf_bakurakuに適用
             if df_bakuraku is not None:
                 # selected_unpaid_bakuraku辞書を基にdf_bakurakuの'入金有無'を更新
+                # 辞書に存在しないインデックスはデフォルトで'あり'とする
                 df_bakuraku['入金有無'] = df_bakuraku.index.map(lambda idx: 'なし' if selected_unpaid_bakuraku.get(idx, False) else 'あり')
                 df_bakuraku['未入金金額合計 (税込)'] = df_bakuraku.apply(lambda row: row['金額'] if row['入金有無'] == 'なし' else 0, axis=1)
                 
@@ -193,9 +195,14 @@ if uploaded_files_bakuraku: # ファイルがアップロードされた場合�
                     入金有無=('入金有無', lambda x: 'なし' if 'なし' in x.values else 'あり') # 一つでも「なし」があれば「なし」
                 ).reset_index()
                 
+                # df_bakuraku_processed の作成時に、結合用に列名を統一
                 df_bakuraku_processed = df_bakuraku_processed.rename(columns={
-                    '日付': '請求書発行日', '支払期日': 'お支払期日', '書類番号': '請求書番号', '送付先名': '企業名',
-                    '金額合計': 'ご請求金額合計 (税込)', '未入金合計': '未入金金額合計 (税込)'
+                    '日付': '請求書発行日', 
+                    '支払期日': 'お支払期日', # ★元のコードでは既に'お支払期日'にリネームされていたが、明示的に。
+                    '書類番号': '請求書番号', 
+                    '送付先名': '企業名',
+                    '金額合計': 'ご請求金額合計 (税込)', 
+                    '未入金合計': '未入金金額合計 (税込)'
                 })
             
             st.subheader("バクラク請求書処理結果")
@@ -209,22 +216,26 @@ if uploaded_files_bakuraku: # ファイルがアップロードされた場合�
 
 # --- 統合結果の表示とExcel出力 ---
 # 両方のデータがアップロードされ、処理された場合のみ表示
-if df_np_processed is not None and df_bakuraku_processed is not None: # df_np_processed と df_bakuraku_processed を使用
+if df_np_processed is not None and df_bakuraku_processed is not None: 
     st.header("3. 統合された請求および入金状況")
     
     # 統合データフレームの作成
     # 日付がNaTでないことを確認してからフォーマット
+    # df_np_processedには既に'お支払期日'があるのでそのまま利用
     df_np_processed['ご利用年月'] = df_np_processed['請求書発行日'].dt.strftime('%Y年%m月')
     df_bakuraku_processed['ご利用年月'] = df_bakuraku_processed['請求書発行日'].dt.strftime('%Y年%m月')
 
-    # 必須列のみを結合用に選択
+    # 結合する際に使用する共通列の定義
     common_cols = ['ご利用年月', 'ご請求方法', 'ご請求金額合計 (税込)', '未入金金額合計 (税込)', '請求書番号', '請求書発行日', 'お支払期日', '入金有無']
     
     # 結合する前に、各DFが共通の列を持っているか最終確認
+    # このチェックはdf_np_processedとdf_bakuraku_processedが適切に作成されていれば通過するはず
     if not all(col in df_np_processed.columns for col in common_cols):
         st.error(f"NP掛け払い処理結果データに結合に必要な列が不足しています: {', '.join(set(common_cols) - set(df_np_processed.columns))}")
+        combined_df_with_total = None
     elif not all(col in df_bakuraku_processed.columns for col in common_cols):
         st.error(f"バクラク請求書処理結果データに結合に必要な列が不足しています: {', '.join(set(common_cols) - set(df_bakuraku_processed.columns))}")
+        combined_df_with_total = None
     else:
         combined_df = pd.concat([
             df_np_processed[common_cols],
@@ -232,6 +243,7 @@ if df_np_processed is not None and df_bakuraku_processed is not None: # df_np_pr
         ])
         
         # ソート
+        # 日付がNaTの場合でもエラーにならないようna_position='last'を指定
         combined_df = combined_df.sort_values(by=['ご利用年月', '請求書発行日'], na_position='last').reset_index(drop=True)
 
         # 合計行の追加
@@ -251,6 +263,7 @@ if df_np_processed is not None and df_bakuraku_processed is not None: # df_np_pr
         
         combined_df_with_total = pd.concat([combined_df, total_row], ignore_index=True)
 
+    if combined_df_with_total is not None:
         # Streamlitでの表示
         st.markdown("### 株式会社BHUSAL ENTERPRISESさま")
         st.markdown("### ご請求およびご入金状況一覧")
@@ -270,16 +283,13 @@ if df_np_processed is not None and df_bakuraku_processed is not None: # df_np_pr
 
         excel_buffer = io.BytesIO()
         
-        # 日付列をExcel friendlyな形式に変換
-        output_df = combined_df.copy()
-        output_df['請求書発行日'] = output_df['請求書発行日'].dt.strftime('%Y/%m/%d')
-        output_df['お支払期日'] = output_df['お支払期日'].dt.strftime('%Y/%m/%d')
+        # Excel出力用に日付列を文字列に変換（NaNは空文字列に）
+        output_df = combined_df_with_total.copy() # 合計行も含んだデータフレームをコピー
+        output_df['請求書発行日'] = output_df['請求書発行日'].dt.strftime('%Y/%m/%d').fillna('')
+        output_df['お支払期日'] = output_df['お支払期日'].dt.strftime('%Y/%m/%d').fillna('')
         
-        # 合計行を追加したDataFrameをExcelに書き込む
-        output_df_with_total = pd.concat([output_df, total_row.astype(output_df.dtypes)], ignore_index=True)
-
         # Excelに書き出し
-        output_df_with_total.to_excel(excel_buffer, index=False, sheet_name='請求入金状況', engine='openpyxl')
+        output_df.to_excel(excel_buffer, index=False, sheet_name='請求入金状況', engine='openpyxl')
         excel_buffer.seek(0) # バッファの先頭に戻す
 
         st.download_button(
@@ -290,7 +300,10 @@ if df_np_processed is not None and df_bakuraku_processed is not None: # df_np_pr
         )
         
         st.info("Excelファイルとしてダウンロード可能です。")
-else:
+    else:
+        st.error("データの結合または処理に問題が発生したため、統合された結果は表示できません。")
+
+else: # どちらかのCSVがアップロードされていない場合
     if uploaded_files_np is None:
         st.info("NP掛け払いCSVファイルをアップロードしてください。")
     if uploaded_files_bakuraku is None:
