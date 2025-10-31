@@ -56,22 +56,21 @@ if uploaded_files_np: # ファイルがアップロードされた場合のみ�
             st.warning("NP掛け払いCSVに '企業名' 列が見つかりませんでした。空文字列として処理を続行します。")
             df_np['企業名'] = '' # 存在しない場合は空の列を追加
 
-        # '請求番号' 列の存在チェックと代替 ★ここを修正/追加しました★
+        # '請求番号' 列の存在チェックと代替
         if '請求番号' not in df_np.columns:
             st.warning("NP掛け払いCSVに '請求番号' 列が見つかりませんでした。空文字列として処理を続行します。")
             df_np['請求番号'] = '' # 存在しない場合は空の列を追加
 
-        # 必須列の存在チェック
-        # '支払期限日'は元のCSVの列名。内部的にはこれを'お支払期日'にリネームする。
-        # '請求番号'は上で存在チェック＆追加済みなので、ここでKeyErrorは発生しないはず
-        required_np_columns = ['請求書発行日', '支払期限日', '企業名', '請求金額', '入金ステータス'] # '請求番号'は必須だが、既に処理済み
-        missing_np_cols = [col for col in required_np_columns if col not in df_np.columns]
+        # 必須列の存在チェック (上で追加した'企業名', '請求番号'はここでチェックしない)
+        required_np_columns_for_processing = ['請求書発行日', '支払期限日', '請求金額', '入金ステータス'] 
+        missing_np_cols = [col for col in required_np_columns_for_processing if col not in df_np.columns]
+        
         if missing_np_cols:
             st.error(f"NP掛け払いCSVに以下の必須列が見つかりません: {', '.join(missing_np_cols)}")
             df_np = None # 処理を中断
         else:
             df_np['請求書発行日'] = pd.to_datetime(df_np['請求書発行日'], errors='coerce')
-            df_np['支払期限日'] = pd.to_datetime(df_np['支払期限日'], errors='coerce') # 元の列名を処理
+            df_np['支払期限日'] = pd.to_datetime(df_np['支払期限日'], errors='coerce')
 
             # 日付変換エラーのチェック
             if df_np['請求書発行日'].isnull().any() or df_np['支払期限日'].isnull().any():
@@ -83,15 +82,20 @@ if uploaded_files_np: # ファイルがアップロードされた場合のみ�
             df_np['請求金額'] = pd.to_numeric(df_np['請求金額'], errors='coerce').fillna(0)
             df_np['未入金金額合計 (税込)'] = df_np.apply(lambda row: row['請求金額'] if row['入金有無'] == 'なし' else 0, axis=1)
             
-            # df_np_processed の作成時に、結合用に列名を統一
-            # '請求番号'列は上で存在が保証されている
-            df_np_processed = df_np[['請求書発行日', '支払期限日', '請求番号', '企業名', 'ご請求方法', '請求金額', '未入金金額合計 (税込)', '入金有無']].copy()
-            df_np_processed = df_np_processed.rename(columns={'請求金額': 'ご請求金額合計 (税込)'})
-            # NP掛け払いの'支払期限日'を'お支払期日'にリネームして共通化
-            df_np_processed = df_np_processed.rename(columns={'支払期限日': 'お支払期日'}) 
+            # df_np_processed を作成するために必要な列リスト
+            cols_for_np_processed = ['請求書発行日', '支払期限日', '請求番号', '企業名', 'ご請求方法', '請求金額', '未入金金額合計 (税込)', '入金有無']
             
-            st.subheader("NP掛け払い処理結果")
-            st.dataframe(df_np_processed)
+            # df_np にすべての必要な列があることを最終確認
+            if all(col in df_np.columns for col in cols_for_np_processed):
+                df_np_processed = df_np[cols_for_np_processed].copy()
+                df_np_processed = df_np_processed.rename(columns={'請求金額': 'ご請求金額合計 (税込)'})
+                df_np_processed = df_np_processed.rename(columns={'支払期限日': 'お支払期日'}) 
+                
+                st.subheader("NP掛け払い処理結果")
+                st.dataframe(df_np_processed)
+            else:
+                st.error("NP掛け払い処理済みデータフレームの作成に必要な列が不足しています。予期せぬエラーが発生しました。")
+                df_np_processed = None # エラーのため処理済みデータフレームをNoneにする
     else:
         st.info("NP掛け払いCSVファイルがアップロードされていません。")
 
@@ -231,8 +235,10 @@ if df_np_processed is not None and df_bakuraku_processed is not None:
     
     # 統合データフレームの作成
     # 日付がNaTでないことを確認してからフォーマット
-    df_np_processed['ご利用年月'] = df_np_processed['請求書発行日'].dt.strftime('%Y年%m月')
-    df_bakuraku_processed['ご利用年月'] = df_bakuraku_processed['請求書発行日'].dt.strftime('%Y年%m月')
+    # df_np_processed['請求書発行日']がpd.Timestamp型であることを保証
+    # df_np_processed['ご利用年月'] = df_np_processed['請求書発行日'].dt.strftime('%Y年%m月') # 既にTimestampなのでエラーにならないはず
+    df_np_processed['ご利用年月'] = df_np_processed['請求書発行日'].apply(lambda x: x.strftime('%Y年%m月') if pd.notna(x) else '')
+    df_bakuraku_processed['ご利用年月'] = df_bakuraku_processed['請求書発行日'].apply(lambda x: x.strftime('%Y年%m月') if pd.notna(x) else '')
 
     # 結合する際に使用する共通列の定義
     common_cols = ['ご利用年月', 'ご請求方法', 'ご請求金額合計 (税込)', '未入金金額合計 (税込)', '請求書番号', '請求書発行日', 'お支払期日', '入金有無', '企業名']
@@ -245,11 +251,16 @@ if df_np_processed is not None and df_bakuraku_processed is not None:
         st.error(f"バクラク請求書処理結果データに結合に必要な列が不足しています: {', '.join(set(common_cols) - set(df_bakuraku_processed.columns))}")
         combined_df_with_total = None
     else:
+        # pd.Timestamp と NaT が混在する可能性があるため、concat後に適切な型に変換
         combined_df = pd.concat([
             df_np_processed[common_cols],
             df_bakuraku_processed[common_cols]
         ])
         
+        # 請求書発行日と支払期日のdtypeをdatetimeに統一（NaT含む）
+        combined_df['請求書発行日'] = pd.to_datetime(combined_df['請求書発行日'], errors='coerce')
+        combined_df['お支払期日'] = pd.to_datetime(combined_df['お支払期日'], errors='coerce')
+
         # ソート
         # 日付がNaTの場合でもエラーにならないようna_position='last'を指定
         combined_df = combined_df.sort_values(by=['ご利用年月', '請求書発行日'], na_position='last').reset_index(drop=True)
@@ -264,37 +275,41 @@ if df_np_processed is not None and df_bakuraku_processed is not None:
             'ご請求金額合計 (税込)': total_請求金額,
             '未入金金額合計 (税込)': total_未入金金額,
             '請求書番号': '',
-            '請求書発行日': '',
-            'お支払期日': '',
+            '請求書発行日': pd.NaT, # 日付型としてpd.NaTを設定
+            'お支払期日': pd.NaT, # 日付型としてpd.NaTを設定
             '入金有無': '',
             '企業名': '' # 合計行にも'企業名'列を追加
         }])
         
-        combined_df_with_total = pd.concat([combined_df, total_row], ignore_index=True)
+        # combined_df_with_totalを作成する前に、combined_dfとtotal_rowの列順と型をできるだけ合わせる
+        # pd.concatが失敗しないようにtotal_rowの型を調整
+        total_row_typed = total_row.astype(combined_df.dtypes)
+
+        combined_df_with_total = pd.concat([combined_df, total_row_typed], ignore_index=True)
+
 
     if combined_df_with_total is not None:
         # Streamlitでの表示
         # 企業名を動的に取得（最初のNP掛け払いデータまたはバクラク請求書の送付先名から）
         company_name = "不明な企業"
+        all_unique_companies = []
+
         if df_np_processed is not None and not df_np_processed.empty and '企業名' in df_np_processed.columns:
-            # 重複を避けてユニークな企業名を抽出
-            unique_np_companies = df_np_processed['企業名'].dropna().unique()
-            if len(unique_np_companies) == 1:
-                company_name = unique_np_companies[0]
-            elif len(unique_np_companies) > 1:
-                company_name = ", ".join(unique_np_companies[:2]) + " 他" # 複数ある場合は適当に表示
+            all_unique_companies.extend(df_np_processed['企業名'].dropna().unique().tolist())
             
         if df_bakuraku_processed is not None and not df_bakuraku_processed.empty and '企業名' in df_bakuraku_processed.columns:
-            unique_bakuraku_companies = df_bakuraku_processed['企業名'].dropna().unique()
-            if company_name == "不明な企業" and len(unique_bakuraku_companies) == 1:
-                company_name = unique_bakuraku_companies[0]
-            elif company_name != "不明な企業" and len(unique_bakuraku_companies) > 0 and company_name not in unique_bakuraku_companies:
-                # 異なる企業名がNPとバクラクで検出された場合
-                if not isinstance(company_name, list): company_name = [company_name]
-                company_name.extend(list(unique_bakuraku_companies))
-                company_name = ", ".join(list(set(company_name))[:2]) + " 他"
-            elif company_name == "不明な企業" and len(unique_bakuraku_companies) > 1:
-                 company_name = ", ".join(unique_bakuraku_companies[:2]) + " 他"
+            all_unique_companies.extend(df_bakuraku_processed['企業名'].dropna().unique().tolist())
+        
+        unique_companies_set = sorted(list(set(all_unique_companies)))
+
+        if len(unique_companies_set) == 1:
+            company_name = unique_companies_set[0]
+        elif len(unique_companies_set) > 1:
+            company_name = ", ".join(unique_companies_set[:2]) + " 他"
+        
+        # もし企業名が空の文字列だったらデフォルト値を設定
+        if not company_name:
+            company_name = "取引先"
 
 
         st.markdown(f"### {company_name}さま")
@@ -304,7 +319,10 @@ if df_np_processed is not None and df_bakuraku_processed is not None:
         # DataFrameをそのまま表示 (金額にカンマ区切りフォーマットを適用)
         st.dataframe(combined_df_with_total.style.format({
             'ご請求金額合計 (税込)': '{:,.0f}',
-            '未入金金額合計 (税込)': '{:,.0f}'
+            '未入金金額合計 (税込)': '{:,.0f}',
+            # 日付列のフォーマット (NaTは空文字列)
+            '請求書発行日': lambda x: x.strftime('%Y/%m/%d') if pd.notna(x) else '',
+            'お支払期日': lambda x: x.strftime('%Y/%m/%d') if pd.notna(x) else ''
         }))
 
         st.markdown(f"**※{datetime.date.today().strftime('%Y年%m月')}時点での未入金合計金額: {total_未入金金額:,}円**")
@@ -333,7 +351,7 @@ if df_np_processed is not None and df_bakuraku_processed is not None:
         
         st.info("Excelファイルとしてダウンロード可能です。")
     else:
-        st.error("データの結合または処理に問題が発生したため、統合された結果は表示できません。")
+        st.error("データの結合または処理に問題が発生したため、統合された結果は表示できません。上記のエラーメッセージを確認してください。")
 
 else: # どちらかのCSVがアップロードされていない場合、または処理に失敗した場合
     if uploaded_files_np is None:
