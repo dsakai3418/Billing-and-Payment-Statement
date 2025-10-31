@@ -56,8 +56,7 @@ if uploaded_files_np: # ファイルがアップロードされた場合のみ�
             st.warning("NP掛け払いCSVに '企業名' 列が見つかりませんでした。空文字列として処理を続行します。")
             df_np['企業名'] = '' # 存在しない場合は空の列を追加
 
-        # '請求番号' 列の存在チェックと代替 ★ここを強化します★
-        # どの時点でのdf_npに列が存在しないか確認するため、デバッグ表示を追加
+        # '請求番号' 列の存在チェックと代替
         if '請求番号' not in df_np.columns:
             st.warning("NP掛け払いCSVに '請求番号' 列が見つかりませんでした。空文字列として列を追加します。")
             df_np['請求番号'] = '' # 存在しない場合は空の列を追加
@@ -67,6 +66,7 @@ if uploaded_files_np: # ファイルがアップロードされた場合のみ�
 
 
         # 必須列の存在チェック (上で追加した'企業名', '請求番号'はここでチェックしない)
+        # '支払期限日' をここで確認するように変更
         required_np_columns_for_processing = ['請求書発行日', '支払期限日', '請求金額', '入金ステータス'] 
         missing_np_cols = [col for col in required_np_columns_for_processing if col not in df_np.columns]
         
@@ -75,10 +75,12 @@ if uploaded_files_np: # ファイルがアップロードされた場合のみ�
             df_np = None # 処理を中断
         else:
             df_np['請求書発行日'] = pd.to_datetime(df_np['請求書発行日'], errors='coerce')
-            df_np['支払期限日'] = pd.to_datetime(df_np['支払期限日'], errors='coerce')
+            # '支払期限日' 列を処理
+            df_np['支払期限日'] = pd.to_datetime(df_np['支払期限日'], errors='coerce') # ここを df_np['支払期限日'] に修正
 
             # 日付変換エラーのチェック
-            if df_np['請求書発行日'].isnull().any() or df_np['支払期日'].isnull().any():
+            # '支払期限日' をチェックするように修正
+            if df_np['請求書発行日'].isnull().any() or df_np['支払期限日'].isnull().any():
                 st.warning("NP掛け払いCSVの日付列に無効な値がありました。該当行はNaNとして処理されます。")
 
             df_np['入金有無'] = df_np['入金ステータス'].apply(lambda x: 'あり' if x == '入金済み' else 'なし')
@@ -88,6 +90,7 @@ if uploaded_files_np: # ファイルがアップロードされた場合のみ�
             df_np['未入金金額合計 (税込)'] = df_np.apply(lambda row: row['請求金額'] if row['入金有無'] == 'なし' else 0, axis=1)
             
             # df_np_processed を作成するために必要な列リスト
+            # ここも '支払期限日' を含めるように変更
             cols_for_np_processed = ['請求書発行日', '支払期限日', '請求番号', '企業名', 'ご請求方法', '請求金額', '未入金金額合計 (税込)', '入金有無']
             
             # df_np にすべての必要な列があることを最終確認
@@ -95,7 +98,8 @@ if uploaded_files_np: # ファイルがアップロードされた場合のみ�
             if all(col in df_np.columns for col in cols_for_np_processed):
                 df_np_processed = df_np[cols_for_np_processed].copy()
                 df_np_processed = df_np_processed.rename(columns={'請求金額': 'ご請求金額合計 (税込)'})
-                df_np_processed = df_np_processed.rename(columns={'支払期限日': 'お支払期日'}) 
+                # ここで '支払期限日' を 'お支払期日' にリネーム
+                df_np_processed = df_np_processed.rename(columns={'支払期限日': 'お支払期日'}) # ★ここを修正★
                 
                 st.subheader("NP掛け払い処理結果")
                 st.dataframe(df_np_processed)
@@ -241,8 +245,6 @@ if df_np_processed is not None and df_bakuraku_processed is not None:
     
     # 統合データフレームの作成
     # 日付がNaTでないことを確認してからフォーマット
-    # df_np_processed['請求書発行日']がpd.Timestamp型であることを保証
-    # df_np_processed['ご利用年月'] = df_np_processed['請求書発行日'].dt.strftime('%Y年%m月') # 既にTimestampなのでエラーにならないはず
     df_np_processed['ご利用年月'] = df_np_processed['請求書発行日'].apply(lambda x: x.strftime('%Y年%m月') if pd.notna(x) else '')
     df_bakuraku_processed['ご利用年月'] = df_bakuraku_processed['請求書発行日'].apply(lambda x: x.strftime('%Y年%m月') if pd.notna(x) else '')
 
@@ -288,8 +290,6 @@ if df_np_processed is not None and df_bakuraku_processed is not None:
         }])
         
         # combined_df_with_totalを作成する前に、combined_dfとtotal_rowの列順と型をできるだけ合わせる
-        # pd.concatが失敗しないようにtotal_rowの型を調整
-        # (以前のコードでこれを自動的に行うようにしていましたが、明示的にキャストします)
         # combined_dfの数値列はfloat64になりうるため、total_rowの数値も合わせる
         for col in ['ご請求金額合計 (税込)', '未入金金額合計 (税込)']:
             if col in combined_df.columns and combined_df[col].dtype != total_row[col].dtype:
@@ -301,7 +301,8 @@ if df_np_processed is not None and df_bakuraku_processed is not None:
     if combined_df_with_total is not None:
         # Streamlitでの表示
         # 企業名を動的に取得（最初のNP掛け払いデータまたはバクラク請求書の送付先名から）
-        company_name = "不明な企業"
+        company_name = "取引先" # デフォルト値
+
         all_unique_companies = []
 
         if df_np_processed is not None and not df_np_processed.empty and '企業名' in df_np_processed.columns:
