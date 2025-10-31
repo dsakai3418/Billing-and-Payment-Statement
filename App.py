@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import io
 import datetime
-from weasyprint import HTML, CSS # PDF生成用
+# from weasyprint import HTML, CSS # PDF生成用 - 削除
 
 st.set_page_config(layout="wide") # レイアウトを広めに設定
 
@@ -52,7 +52,6 @@ if uploaded_file_bakuraku is not None:
     
     selected_unpaid_bakuraku = {}
     if df_bakuraku is not None:
-        # スクロール可能なコンテナでチェックボックスを表示
         with st.expander("バクラク請求書一覧を開く"):
             for index, row in df_bakuraku.iterrows():
                 unique_key = f"bakuraku_unpaid_{row['書類番号']}_{row['日付']}_{row['金額']}"
@@ -70,7 +69,7 @@ if uploaded_file_bakuraku is not None:
     st.subheader("バクラク請求書処理結果")
     st.dataframe(df_bakuraku_processed)
 
-# --- 統合結果の表示と出力 ---
+# --- 統合結果の表示とExcel出力 ---
 if df_np is not None and df_bakuraku is not None:
     st.header("統合された請求および入金状況")
     
@@ -102,150 +101,43 @@ if df_np is not None and df_bakuraku is not None:
     combined_df_with_total = pd.concat([combined_df, total_row], ignore_index=True)
 
     # Streamlitでの表示 (PDFのような形式を意識)
-    # PDF生成用のHTMLコンテンツとして保持
-    html_output_content = f"""
-    <!DOCTYPE html>
-    <html lang="ja">
-    <head>
-        <meta charset="UTF-8">
-        <title>ご請求およびご入金状況一覧</title>
-        <style>
-            body {{ font-family: 'Yu Gothic', 'Meiryo', sans-serif; margin: 20mm; }}
-            h1, h3 {{ text-align: left; }}
-            table {{
-                width: 100%;
-                border-collapse: collapse;
-                font-size: 12px;
-                margin-top: 10px;
-            }}
-            th, td {{
-                border: 1px solid #ddd;
-                padding: 6px;
-                text-align: left;
-            }}
-            th {{
-                background-color: #f2f2f2;
-                font-weight: bold;
-            }}
-            .total-row td {{
-                font-weight: bold;
-                background-color: #e0e0e0;
-            }}
-            .header-info {{
-                text-align: right;
-                font-size: 10px;
-                margin-bottom: 20px;
-            }}
-            .summary-total {{
-                font-weight: bold;
-                background-color: #e0e0e0;
-                padding: 8px;
-                border: 1px solid #ddd;
-                margin-top: 20px;
-            }}
-        </style>
-    </head>
-    <body>
-        <div class="header-info">
-            {datetime.date.today().strftime('%Y/%m/%d')}<br>
-            株式会社tacoms
-        </div>
-        <h1>株式会社BHUSAL ENTERPRISESさま</h1>
-        <h3>ご請求およびご入金状況一覧</h3>
-        <table>
-            <thead>
-                <tr>
-                    <th>ご利用年月</th>
-                    <th>ご請求方法</th>
-                    <th>ご請求金額合計 (税込)</th>
-                    <th>未入金金額合計 (税込)</th>
-                    <th>請求書番号</th>
-                    <th>請求書発行日</th>
-                    <th>お支払期日</th>
-                    <th>入金有無</th>
-                </tr>
-            </thead>
-            <tbody>
-    """
-    # データ行
-    for index, row in combined_df.iterrows():
-        html_output_content += f"""
-                <tr>
-                    <td>{row['ご利用年月']}</td>
-                    <td>{row['ご請求方法']}</td>
-                    <td>{row['ご請求金額合計 (税込)']:,}</td>
-                    <td>{row['未入金金額合計 (税込)']:,}</td>
-                    <td>{row['請求書番号']}</td>
-                    <td>{row['請求書発行日'].strftime('%Y/%m/%d')}</td>
-                    <td>{row['お支払期日'].strftime('%Y/%m/%d')}</td>
-                    <td>{row['入金有無']}</td>
-                </tr>
-        """
-    # 合計行
-    html_output_content += f"""
-                <tr class="total-row">
-                    <td></td>
-                    <td>合計</td>
-                    <td>{total_請求金額:,}</td>
-                    <td>{total_未入金金額:,}</td>
-                    <td></td>
-                    <td></td>
-                    <td></td>
-                    <td></td>
-                </tr>
-            </tbody>
-        </table>
-        <p class="summary-total">
-            ※{datetime.date.today().strftime('%Y年%m月')}時点での未入金合計金額: {total_未入金金額:,}円
-        </p>
-    </body>
-    </html>
-    """
+    # Excel出力のみなので、HTML表示はシンプルにDataFrameをst.dataframeで表示するか、Markdownで体裁を整える
     
-    # Streamlit上で表示
-    st.markdown(html_output_content, unsafe_allow_html=True)
+    st.markdown("### 株式会社BHUSAL ENTERPRISESさま")
+    st.markdown("### ご請求およびご入金状況一覧")
+    st.markdown(f"**作成日: {datetime.date.today().strftime('%Y/%m/%d')}**")
+
+    # DataFrameをそのまま表示 (PDFのようなフォーマットはExcelで実現)
+    st.dataframe(combined_df_with_total.style.format({
+        'ご請求金額合計 (税込)': '{:,.0f}',
+        '未入金金額合計 (税込)': '{:,.0f}'
+    })) # 金額にカンマ区切りフォーマットを適用
+
+    st.markdown(f"**※{datetime.date.today().strftime('%Y年%m月')}時点での未入金合計金額: {total_未入金金額:,}円**")
 
 
-    # --- 出力形式選択とダウンロードボタン ---
-    st.subheader("出力形式を選択")
-    output_format = st.radio("どの形式でダウンロードしますか？", ("Excel", "PDF"))
-
+    # --- Excel出力ボタン ---
     current_date_str = datetime.date.today().strftime('%Y%m%d_%H%M%S')
 
-    if output_format == "Excel":
-        # to_excel()が一時的に利用するバッファ
-        excel_buffer = io.BytesIO()
-        
-        # 日付列をExcel friendlyな形式に変換
-        output_df = combined_df.copy()
-        output_df['請求書発行日'] = output_df['請求書発行日'].dt.strftime('%Y/%m/%d')
-        output_df['お支払期日'] = output_df['お支払期日'].dt.strftime('%Y/%m/%d')
-        
-        # 合計行を追加したDataFrameをExcelに書き込む
-        output_df_with_total = pd.concat([output_df, total_row.astype(output_df.dtypes)], ignore_index=True)
-
-        # Excelに書き出し
-        output_df_with_total.to_excel(excel_buffer, index=False, engine='openpyxl')
-        excel_buffer.seek(0) # バッファの先頭に戻す
-
-        st.download_button(
-            label="Excelファイルとしてダウンロード",
-            data=excel_buffer,
-            file_name=f"請求入金状況_{current_date_str}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+    excel_buffer = io.BytesIO()
     
-    elif output_format == "PDF":
-        pdf_buffer = io.BytesIO()
-        # WeasyPrintでHTMLをPDFに変換
-        HTML(string=html_output_content).write_pdf(pdf_buffer)
-        pdf_buffer.seek(0)
-
-        st.download_button(
-            label="PDFファイルとしてダウンロード",
-            data=pdf_buffer,
-            file_name=f"請求入金状況_{current_date_str}.pdf",
-            mime="application/pdf"
-        )
+    # 日付列をExcel friendlyな形式に変換
+    output_df = combined_df.copy()
+    output_df['請求書発行日'] = output_df['請求書発行日'].dt.strftime('%Y/%m/%d')
+    output_df['お支払期日'] = output_df['お支払期日'].dt.strftime('%Y/%m/%d')
     
-    st.info("選択された形式でダウンロードボタンが表示されます。")
+    # 合計行を追加したDataFrameをExcelに書き込む
+    output_df_with_total = pd.concat([output_df, total_row.astype(output_df.dtypes)], ignore_index=True)
+
+    # Excelに書き出し
+    output_df_with_total.to_excel(excel_buffer, index=False, engine='openpyxl')
+    excel_buffer.seek(0) # バッファの先頭に戻す
+
+    st.download_button(
+        label="Excelファイルとしてダウンロード",
+        data=excel_buffer,
+        file_name=f"請求入金状況_{current_date_str}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    
+    st.info("Excelファイルとしてダウンロード可能です。")
