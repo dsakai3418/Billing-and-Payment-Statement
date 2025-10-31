@@ -52,7 +52,7 @@ if uploaded_files_np: # ファイルがアップロードされた場合のみ�
         # NP掛け払いデータの処理
         df_np = df_np_raw_combined.copy() # 処理用コピー
         
-        # --- 列名の正規化 --- ★修正点★
+        # --- 列名の正規化 ---
         # 列名の前後の空白を除去し、英数字を半角に、カタカナを全角に変換
         new_columns = []
         for col in df_np.columns:
@@ -67,7 +67,7 @@ if uploaded_files_np: # ファイルがアップロードされた場合のみ�
             st.warning("NP掛け払いCSVに '企業名' 列が見つかりませんでした。空文字列として処理を続行します。")
             df_np['企業名'] = '' # 存在しない場合は空の列を追加
 
-        # '請求番号' 列の存在チェックと代替 ★修正点★
+        # '請求番号' 列の存在チェックと代替
         # 正規化後も '請求番号' がなければ、強制的に追加
         if '請求番号' not in df_np.columns:
             st.warning("NP掛け払いCSVに '請求番号' 列が見つかりませんでした。空文字列として列を追加します。")
@@ -101,7 +101,11 @@ if uploaded_files_np: # ファイルがアップロードされた場合のみ�
             st.info(f"デバッグ: df_np_processed作成直前のdf_npの列: {df_np.columns.tolist()}") # デバッグ表示
             if all(col in df_np.columns for col in cols_for_np_processed):
                 df_np_processed = df_np[cols_for_np_processed].copy()
-                df_np_processed = df_np_processed.rename(columns={'請求金額': 'ご請求金額合計 (税込)', '支払期限日': 'お支払期日'})
+                df_np_processed = df_np_processed.rename(columns={
+                    '請求金額': 'ご請求金額合計 (税込)', 
+                    '支払期限日': 'お支払期日',
+                    '請求番号': '請求書番号' # ★この行を追加★
+                })
                 
                 st.subheader("NP掛け払い処理結果")
                 st.dataframe(df_np_processed)
@@ -150,7 +154,7 @@ if uploaded_files_bakuraku: # ファイルがアップロードされた場合�
         # バクラク請求書データの処理
         df_bakuraku = df_bakuraku_raw_combined.copy() # 処理用コピー
 
-        # --- 列名の正規化 --- ★修正点★
+        # --- 列名の正規化 ---
         new_columns_bakuraku = []
         for col in df_bakuraku.columns:
             normalized_col = col.strip()
@@ -185,11 +189,6 @@ if uploaded_files_bakuraku: # ファイルがアップロードされた場合�
             selected_unpaid_bakuraku = {}
             if df_bakuraku is not None and not df_bakuraku.empty: 
                 with st.expander("バクラク請求書一覧を開く"):
-                    # 重複を除去する際に、元のデータフレームの各行にユニークなIDを振るか、
-                    # あるいは、書類番号、日付、金額が同じものは同じ請求として扱う
-                    # ここでは、表示の便宜上、書類番号と日付と金額で重複を除去したものを表示し、
-                    # 選択されたら、その組み合わせに一致するすべてのレコードの選択状態を更新する
-                    
                     # 'original_index' を一時的に追加して、後で元の行にマッピングできるようにする
                     df_bakuraku_temp = df_bakuraku.reset_index().rename(columns={'index': 'original_index'})
                     df_bakuraku_display = df_bakuraku_temp[['original_index', '書類番号', '日付', '金額']].drop_duplicates(subset=['書類番号', '日付', '金額']).set_index('original_index')
@@ -320,7 +319,7 @@ if df_np_processed is not None and df_bakuraku_processed is not None:
         elif len(unique_companies_set) > 1:
             company_name = ", ".join(unique_companies_set[:2]) + " 他"
         
-        if not company_name or company_name.strip() == "": # 空文字列や空白のみの場合のチェックを追加
+        if not company_name or company_name.strip() == "": 
             company_name = "取引先"
 
 
@@ -362,7 +361,7 @@ if df_np_processed is not None and df_bakuraku_processed is not None:
         st.error("データの結合または処理に問題が発生したため、統合された結果は表示できません。上記のエラーメッセージを確認してください。")
 
 else: 
-    if uploaded_files_np is None or not uploaded_files_np: # Noneまたは空リストの場合
+    if uploaded_files_np is None or not uploaded_files_np: 
         st.info("NP掛け払いCSVファイルをアップロードしてください。")
-    if uploaded_files_bakuraku is None or not uploaded_files_bakuraku: # Noneまたは空リストの場合
+    if uploaded_files_bakuraku is None or not uploaded_files_bakuraku: 
         st.info("バクラク請求書CSVファイルをアップロードしてください。")
