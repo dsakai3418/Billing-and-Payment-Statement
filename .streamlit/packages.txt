@@ -1,4 +1,9 @@
-pango-1.0
-libcairo2
+build-essential
+pkg-config
+libcairo2-dev
+libpango-1.0-0
+libpangoft2-1.0-0
+libpangocairo-1.0-0
 libgdk-pixbuf2.0-0
 libffi-dev
+shared-mime-info
