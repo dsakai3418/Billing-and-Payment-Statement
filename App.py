@@ -56,10 +56,15 @@ if uploaded_files_np: # ファイルがアップロードされた場合のみ�
             st.warning("NP掛け払いCSVに '企業名' 列が見つかりませんでした。空文字列として処理を続行します。")
             df_np['企業名'] = '' # 存在しない場合は空の列を追加
 
-        # '請求番号' 列の存在チェックと代替
+        # '請求番号' 列の存在チェックと代替 ★ここを強化します★
+        # どの時点でのdf_npに列が存在しないか確認するため、デバッグ表示を追加
         if '請求番号' not in df_np.columns:
-            st.warning("NP掛け払いCSVに '請求番号' 列が見つかりませんでした。空文字列として処理を続行します。")
+            st.warning("NP掛け払いCSVに '請求番号' 列が見つかりませんでした。空文字列として列を追加します。")
             df_np['請求番号'] = '' # 存在しない場合は空の列を追加
+            st.info(f"デバッグ: '請求番号' 列追加後のNPデータフレームの列: {df_np.columns.tolist()}") # デバッグ表示
+        else:
+            st.info(f"デバッグ: NPデータフレームに'請求番号'列は元から存在していました。現在の列: {df_np.columns.tolist()}") # デバッグ表示
+
 
         # 必須列の存在チェック (上で追加した'企業名', '請求番号'はここでチェックしない)
         required_np_columns_for_processing = ['請求書発行日', '支払期限日', '請求金額', '入金ステータス'] 
@@ -73,7 +78,7 @@ if uploaded_files_np: # ファイルがアップロードされた場合のみ�
             df_np['支払期限日'] = pd.to_datetime(df_np['支払期限日'], errors='coerce')
 
             # 日付変換エラーのチェック
-            if df_np['請求書発行日'].isnull().any() or df_np['支払期限日'].isnull().any():
+            if df_np['請求書発行日'].isnull().any() or df_np['支払期日'].isnull().any():
                 st.warning("NP掛け払いCSVの日付列に無効な値がありました。該当行はNaNとして処理されます。")
 
             df_np['入金有無'] = df_np['入金ステータス'].apply(lambda x: 'あり' if x == '入金済み' else 'なし')
@@ -86,6 +91,7 @@ if uploaded_files_np: # ファイルがアップロードされた場合のみ�
             cols_for_np_processed = ['請求書発行日', '支払期限日', '請求番号', '企業名', 'ご請求方法', '請求金額', '未入金金額合計 (税込)', '入金有無']
             
             # df_np にすべての必要な列があることを最終確認
+            st.info(f"デバッグ: df_np_processed作成直前のdf_npの列: {df_np.columns.tolist()}") # デバッグ表示
             if all(col in df_np.columns for col in cols_for_np_processed):
                 df_np_processed = df_np[cols_for_np_processed].copy()
                 df_np_processed = df_np_processed.rename(columns={'請求金額': 'ご請求金額合計 (税込)'})
@@ -94,7 +100,7 @@ if uploaded_files_np: # ファイルがアップロードされた場合のみ�
                 st.subheader("NP掛け払い処理結果")
                 st.dataframe(df_np_processed)
             else:
-                st.error("NP掛け払い処理済みデータフレームの作成に必要な列が不足しています。予期せぬエラーが発生しました。")
+                st.error("NP掛け払い処理済みデータフレームの作成に必要な列が不足しています。予期せぬエラーが発生しました。不足している列は上記デバッグ情報をご確認ください。")
                 df_np_processed = None # エラーのため処理済みデータフレームをNoneにする
     else:
         st.info("NP掛け払いCSVファイルがアップロードされていません。")
@@ -283,9 +289,13 @@ if df_np_processed is not None and df_bakuraku_processed is not None:
         
         # combined_df_with_totalを作成する前に、combined_dfとtotal_rowの列順と型をできるだけ合わせる
         # pd.concatが失敗しないようにtotal_rowの型を調整
-        total_row_typed = total_row.astype(combined_df.dtypes)
-
-        combined_df_with_total = pd.concat([combined_df, total_row_typed], ignore_index=True)
+        # (以前のコードでこれを自動的に行うようにしていましたが、明示的にキャストします)
+        # combined_dfの数値列はfloat64になりうるため、total_rowの数値も合わせる
+        for col in ['ご請求金額合計 (税込)', '未入金金額合計 (税込)']:
+            if col in combined_df.columns and combined_df[col].dtype != total_row[col].dtype:
+                total_row[col] = total_row[col].astype(combined_df[col].dtype)
+        
+        combined_df_with_total = pd.concat([combined_df, total_row], ignore_index=True)
 
 
     if combined_df_with_total is not None:
