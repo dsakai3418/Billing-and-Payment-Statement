@@ -1,4 +1,4 @@
 streamlit
 pandas
 openpyxl
-weasyprint
+chardet  # この行を追加
