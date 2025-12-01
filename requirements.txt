@@ -1,4 +1,6 @@
 streamlit
 pandas
 openpyxl
-chardet  # この行を追加
+chardet
+gspread
+gspread-dataframe
