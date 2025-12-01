@@ -1,12 +1,11 @@
 import streamlit as st
 import pandas as pd
-import gspread
-from gspread_dataframe import set_with_dataframe
 from datetime import datetime
+import io # Excel/CSV出力用
 
 # --- Streamlit UI ---
 st.title("請求書管理アプリ")
-st.write("NP掛け払いとバクラク請求書のCSVを処理し、スプレッドシートに出力します。")
+st.write("NP掛け払いとバクラク請求書のCSVを処理し、Excel/CSVファイルに出力します。")
 
 # --- NP掛け払いCSVアップロード ---
 st.header("1. NP掛け払いCSVのアップロード")
@@ -38,7 +37,6 @@ if uploaded_bakuraku_file is not None:
     st.subheader("バクラク請求書CSV内容（先頭5行）")
     st.dataframe(bakuraku_df.head())
 
-    # 請求を特定するためのユニークなID
     if not bakuraku_df.empty:
         bakuraku_df['請求識別子'] = bakuraku_df['請求番号'].astype(str) + " - " + bakuraku_df['取引先'].astype(str) + " - " + bakuraku_df['請求額'].astype(str)
 
@@ -61,15 +59,13 @@ if uploaded_bakuraku_file is not None:
         # 選択されなかった請求を「未入金」として仮マーク
         bakuraku_temp_unpaid_df = bakuraku_df[~bakuraku_df['請求識別子'].isin(selected_paid_invoices)].copy()
         if not bakuraku_temp_unpaid_df.empty:
-            st.subheader("2b. スプレッドシートから除外する未入金請求書を選択してください")
-            # 出力対象から外す未入金請求書を選択
+            st.subheader("2b. 出力から除外する未入金請求書を選択してください")
             excluded_unpaid_from_output = st.multiselect(
                 "出力から除外する未入金請求書を選択",
                 options=bakuraku_temp_unpaid_df['請求識別子'].tolist(),
-                help="スプレッドシートに未入金として出力したくない請求書を選択してください。",
+                help="Excel/CSVファイルに未入金として出力したくない請求書を選択してください。",
                 key="bakuraku_exclude_select"
             )
-            # 選択されなかったものが「出力対象の未入金請求書」となる
             bakuraku_output_unpaid_df = bakuraku_temp_unpaid_df[~bakuraku_temp_unpaid_df['請求識別子'].isin(excluded_unpaid_from_output)].copy()
             
             if not bakuraku_output_unpaid_df.empty:
@@ -83,55 +79,62 @@ if uploaded_bakuraku_file is not None:
     else:
         st.info("バクラク請求書がアップロードされていないか、データが空です。")
 
-# --- スプレッドシートへの出力 ---
-st.header("3. 結果をスプレッドシートに出力")
+# --- ファイルへの出力 ---
+st.header("3. 結果をファイルに出力")
 
-# ここでGoogle Sheets APIの認証を行います。
-try:
-    gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
-except Exception as e:
-    st.error(f"Google Sheets APIの認証に失敗しました。Streamlit Secretsの設定を確認してください。エラー: {e}")
-    gc = None
+# 出力形式の選択
+output_format = st.radio("出力形式を選択してください:", ("Excel (.xlsx)", "CSV (.csv)"))
 
-if st.button("スプレッドシートに出力", disabled=(np_df.empty and bakuraku_output_unpaid_df.empty) or gc is None):
-    if gc is not None:
-        try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            spreadsheet_name = f"請求処理結果_{timestamp}"
-            sh = gc.create(spreadsheet_name) # 新しいスプレッドシートを作成
-            st.success(f"新しいスプレッドシート '{spreadsheet_name}' を作成しました。")
-            st.write(f"[スプレッドシートへのリンク]({sh.url})")
-
-            # NP掛け払いデータを出力
-            if not np_df.empty:
-                np_output_df = np_df[['請求番号', '顧客名', '請求金額', '入金ステータス', '入金状況']]
-                worksheet_np = sh.add_worksheet(title="NP掛け払い", rows=len(np_output_df)+1, cols=len(np_output_df.columns))
-                set_with_dataframe(worksheet_np, np_output_df)
-                st.info("NP掛け払いデータをスプレッドシートに出力しました。")
-
-            # バクラク出力対象未入金データを出力
+# ダウンロードボタンの準備
+# NP掛け払いデータ
+if not np_df.empty:
+    np_output_df_final = np_df[['請求番号', '顧客名', '請求金額', '入金ステータス', '入金状況']] # 出力するカラムを調整
+    
+    if output_format == "Excel (.xlsx)":
+        excel_buffer = io.BytesIO()
+        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+            np_output_df_final.to_excel(writer, sheet_name="NP掛け払い", index=False)
             if not bakuraku_output_unpaid_df.empty:
-                bakuraku_unpaid_output_df = bakuraku_output_unpaid_df[['請求番号', '取引先', '請求額', '入金状況']]
-                worksheet_bakuraku_unpaid = sh.add_worksheet(title="バクラク未入金", rows=len(bakuraku_unpaid_output_df)+1, cols=len(bakuraku_unpaid_output_df.columns))
-                set_with_dataframe(worksheet_bakuraku_unpaid, bakuraku_unpaid_output_df)
-                st.info("バクラク未入金データをスプレッドシートに出力しました。")
-            else:
-                st.info("バクラク未入金データは存在しないため、出力されませんでした。")
-
-            # バクラク入金済みデータを出力（必要であれば、シートを分けるか検討）
+                bakuraku_output_unpaid_df[['請求番号', '取引先', '請求額', '入金状況']].to_excel(writer, sheet_name="バクラク未入金", index=False)
             if not bakuraku_paid_df.empty:
-                bakuraku_paid_output_df = bakuraku_paid_df[['請求番号', '取引先', '請求額', '入金状況']]
-                worksheet_bakuraku_paid = sh.add_worksheet(title="バクラク入金済み", rows=len(bakuraku_paid_output_df)+1, cols=len(bakuraku_paid_output_df.columns))
-                set_with_dataframe(worksheet_bakuraku_paid, bakuraku_paid_output_df)
-                st.info("バクラク入金済みデータもスプレッドシートに出力しました。")
-            else:
-                st.info("バクラク入金済みデータは存在しないため、出力されませんでした。")
-
-
-            st.balloons()
-        except Exception as e:
-            st.error(f"スプレッドシートへの出力中にエラーが発生しました: {e}")
-    else:
-        st.warning("Google Sheets APIが認証されていません。")
+                bakuraku_paid_df[['請求番号', '取引先', '請求額', '入金状況']].to_excel(writer, sheet_name="バクラク入金済み", index=False)
+        st.download_button(
+            label="結果をExcelでダウンロード",
+            data=excel_buffer.getvalue(),
+            file_name=f"請求処理結果_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="download_excel_all"
+        )
+    else: # CSV (.csv)
+        col1, col2, col3 = st.columns(3)
+        if not np_output_df_final.empty:
+            with col1:
+                st.download_button(
+                    label="NP掛け払いCSVダウンロード",
+                    data=np_output_df_final.to_csv(index=False, encoding='utf-8-sig'),
+                    file_name=f"NP掛け払い_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    key="download_np_csv"
+                )
+        if not bakuraku_output_unpaid_df.empty:
+            with col2:
+                st.download_button(
+                    label="バクラク未入金CSVダウンロード",
+                    data=bakuraku_output_unpaid_df[['請求番号', '取引先', '請求額', '入金状況']].to_csv(index=False, encoding='utf-8-sig'),
+                    file_name=f"バクラク未入金_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    key="download_bakuraku_unpaid_csv"
+                )
+        if not bakuraku_paid_df.empty:
+            with col3:
+                st.download_button(
+                    label="バクラク入金済みCSVダウンロード",
+                    data=bakuraku_paid_df[['請求番号', '取引先', '請求額', '入金状況']].to_csv(index=False, encoding='utf-8-sig'),
+                    file_name=f"バクラク入金済み_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    key="download_bakuraku_paid_csv"
+                )
+else:
+    st.info("NP掛け払いデータがアップロードされていないため、ファイル出力オプションは表示されません。")
 
 st.info("添付のExcel形式については、出力するデータフレームのカラム名を調整することで対応できます。")
