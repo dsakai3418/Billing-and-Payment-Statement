@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import io
-import zipfile
+# import zipfile # ZIP圧縮は不要になりました
 
 # --- Streamlit UI ---
 st.title("請求書管理アプリ")
@@ -30,7 +30,9 @@ if uploaded_np_file is not None:
         # NP掛け払いデータ整形
         try:
             # 必須カラムが存在するかチェック（適宜調整）
-            required_np_cols = ['請求番号', '顧客名', '請求金額', '入金ステータス', '請求日付'] # 仮の必須カラム
+            # ここで仮定しているカラム名が実際のCSVと異なる場合、KeyErrorが発生します。
+            # 実際のCSVのカラム名に合わせて修正してください。
+            required_np_cols = ['請求番号', '顧客名', '請求金額', '入金ステータス', '請求日付', 'お支払期日'] # 仮の必須カラム
             if not all(col in np_df_raw.columns for col in required_np_cols):
                 st.error(f"NP掛け払いCSVに必要なカラム({', '.join(required_np_cols)})が見つかりません。CSVファイルを確認してください。")
                 np_df_raw = pd.DataFrame() # 必要なカラムがなければ処理を中断
@@ -48,16 +50,13 @@ if uploaded_np_file is not None:
                 np_df_processed = np_df_processed.rename(columns={
                     '請求番号': '請求書番号',
                     '請求日付': '請求書発行日', # 仮定：請求日付を請求書発行日とする
-                    # お支払期日, 入金有無 は別途マッピング
+                    'お支払期日': 'お支払期日', # 仮定：そのまま使用
                 })
                 # フォーマットにないカラムは削除
                 np_df_processed = np_df_processed[[
                     'ご利用年月', 'ご請求方法', 'ご請求金額合計(税込)', '未入金金額合計(税込)', 
                     '請求書番号', '請求書発行日', 'お支払期日', '入金有無'
                 ]]
-                # 欠損値のお支払期日を一旦空欄で埋める（NP掛け払いCSVにお支払期日がない場合）
-                if 'お支払期日' not in np_df_processed.columns:
-                     np_df_processed['お支払期日'] = ''
                 
                 st.subheader("NP掛け払いデータ (整形後)")
                 st.dataframe(np_df_processed.head())
@@ -86,6 +85,8 @@ if uploaded_bakuraku_file is not None:
         st.subheader("バクラク請求書CSV内容（先頭5行）")
         st.dataframe(bakuraku_df_raw.head())
 
+        # ここで仮定しているカラム名が実際のCSVと異なる場合、KeyErrorが発生します。
+        # 実際のCSVのカラム名に合わせて修正してください。
         required_bakuraku_cols = ['書類番号', '送付先名', '金額', '日付', '支払期日'] # 仮の必須カラム
         if not all(col in bakuraku_df_raw.columns for col in required_bakuraku_cols):
             st.error(f"バクラクCSVに必要なカラム({', '.join(required_bakuraku_cols)})が見つかりません。CSVファイルを確認してください。")
@@ -167,7 +168,7 @@ if not final_output_df.empty:
     total_row = pd.DataFrame([
         {
             'ご利用年月': '',
-            'ご請求方法': '',
+            'ご請求方法': '合計', # 合計行のご請求方法は「合計」とする
             'ご請求金額合計(税込)': final_output_df['ご請求金額合計(税込)'].sum(),
             '未入金金額合計(税込)': final_output_df['未入金金額合計(税込)'].sum(),
             '請求書番号': '',
@@ -201,9 +202,17 @@ if not final_output_df.empty:
             key="download_excel"
         )
     else: # CSV (.csv)
+        # CSVエンコーディングの選択を追加
+        csv_encoding = st.radio(
+            "CSVの文字エンコーディングを選択してください:",
+            ("UTF-8 (BOMあり)", "Shift-JIS"),
+            key="csv_encoding_select"
+        )
+        selected_encoding = 'utf-8-sig' if csv_encoding == "UTF-8 (BOMあり)" else 'shift_jis'
+
         st.download_button(
             label="CSVでダウンロード",
-            data=final_output_df.to_csv(index=False, encoding='utf-8-sig'),
+            data=final_output_df.to_csv(index=False, encoding=selected_encoding),
             file_name=f"{output_filename_base}.csv",
             mime="text/csv",
             key="download_csv"
