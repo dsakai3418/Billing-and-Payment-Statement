@@ -203,14 +203,14 @@ if not final_output_df.empty:
         # CSVエンコーディングの選択を変更
         csv_encoding_choice = st.radio(
             "CSVの文字エンコーディングを選択してください:",
-            ("Mac", "Windows"), # 選択肢名をより分かりやすく
+            ("UTF-8 (BOMなし)", "Windows (CP932)"), # 選択肢名をより分かりやすく
             key="csv_encoding_select"
         )
         
         # 選択に基づいてエンコーディングを設定
-        if csv_encoding_choice == "Mac":
+        if csv_encoding_choice == "UTF-8 (BOMなし)":
             selected_encoding = 'utf-8' # BOMなしのUTF-8
-        else: # Windows
+        else: # Windows (CP932)
             selected_encoding = 'cp932' # Windows環境の日本語Shift-JIS
 
         st.download_button(
