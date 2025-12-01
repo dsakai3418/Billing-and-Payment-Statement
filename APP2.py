@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import io
-# import zipfile # ZIP圧縮は不要になりました
 
 # --- Streamlit UI ---
 st.title("請求書管理アプリ")
@@ -29,7 +28,6 @@ if uploaded_np_file is not None:
 
         # NP掛け払いデータ整形
         try:
-            # 必須カラムが存在するかチェック（適宜調整）
             # ここで仮定しているカラム名が実際のCSVと異なる場合、KeyErrorが発生します。
             # 実際のCSVのカラム名に合わせて修正してください。
             required_np_cols = ['請求番号', '顧客名', '請求金額', '入金ステータス', '請求日付', 'お支払期日'] # 仮の必須カラム
@@ -202,13 +200,18 @@ if not final_output_df.empty:
             key="download_excel"
         )
     else: # CSV (.csv)
-        # CSVエンコーディングの選択を追加
-        csv_encoding = st.radio(
+        # CSVエンコーディングの選択を変更
+        csv_encoding_choice = st.radio(
             "CSVの文字エンコーディングを選択してください:",
-            ("UTF-8 (BOMあり)", "Shift-JIS"),
+            ("Mac", "Windows"), # 選択肢名をより分かりやすく
             key="csv_encoding_select"
         )
-        selected_encoding = 'utf-8-sig' if csv_encoding == "UTF-8 (BOMあり)" else 'shift_jis'
+        
+        # 選択に基づいてエンコーディングを設定
+        if csv_encoding_choice == "Mac":
+            selected_encoding = 'utf-8' # BOMなしのUTF-8
+        else: # Windows
+            selected_encoding = 'cp932' # Windows環境の日本語Shift-JIS
 
         st.download_button(
             label="CSVでダウンロード",
