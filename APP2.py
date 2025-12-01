@@ -28,8 +28,6 @@ if uploaded_np_file is not None:
 
         # NP掛け払いデータ整形
         try:
-            # ここで仮定しているカラム名が実際のCSVと異なる場合、KeyErrorが発生します。
-            # 実際のCSVのカラム名に合わせて修正してください。
             required_np_cols = ['請求番号', '顧客名', '請求金額', '入金ステータス', '請求日付', 'お支払期日'] # 仮の必須カラム
             if not all(col in np_df_raw.columns for col in required_np_cols):
                 st.error(f"NP掛け払いCSVに必要なカラム({', '.join(required_np_cols)})が見つかりません。CSVファイルを確認してください。")
@@ -83,8 +81,6 @@ if uploaded_bakuraku_file is not None:
         st.subheader("バクラク請求書CSV内容（先頭5行）")
         st.dataframe(bakuraku_df_raw.head())
 
-        # ここで仮定しているカラム名が実際のCSVと異なる場合、KeyErrorが発生します。
-        # 実際のCSVのカラム名に合わせて修正してください。
         required_bakuraku_cols = ['書類番号', '送付先名', '金額', '日付', '支払期日'] # 仮の必須カラム
         if not all(col in bakuraku_df_raw.columns for col in required_bakuraku_cols):
             st.error(f"バクラクCSVに必要なカラム({', '.join(required_bakuraku_cols)})が見つかりません。CSVファイルを確認してください。")
@@ -200,24 +196,30 @@ if not final_output_df.empty:
             key="download_excel"
         )
     else: # CSV (.csv)
-        # CSVエンコーディングの選択を変更
         csv_encoding_choice = st.radio(
             "CSVの文字エンコーディングを選択してください:",
-            ("UTF-8 (BOMなし)", "Windows (CP932)"), # 選択肢名をより分かりやすく
+            ("UTF-8 (BOMなし)", "Windows (CP932)"), # 選択肢名を維持
             key="csv_encoding_select"
         )
         
-        # 選択に基づいてエンコーディングを設定
+        csv_buffer = io.BytesIO() # BytesIOはCSVをバイト列として保持するために必要
+
         if csv_encoding_choice == "UTF-8 (BOMなし)":
-            selected_encoding = 'utf-8' # BOMなしのUTF-8
+            # to_csvでUTF-8文字列を生成し、それをutf-8でエンコードしてBytesIOに書き込む
+            csv_str = final_output_df.to_csv(index=False, encoding='utf-8')
+            csv_buffer.write(csv_str.encode('utf-8'))
+            mime_type = "text/csv"
         else: # Windows (CP932)
-            selected_encoding = 'cp932' # Windows環境の日本語Shift-JIS
+            # to_csvでcp932文字列を生成し、それをcp932でエンコードしてBytesIOに書き込む
+            csv_str = final_output_df.to_csv(index=False, encoding='cp932')
+            csv_buffer.write(csv_str.encode('cp932', errors='replace')) # errors='replace'で変換できない文字を置換
+            mime_type = "text/csv"
 
         st.download_button(
             label="CSVでダウンロード",
-            data=final_output_df.to_csv(index=False, encoding=selected_encoding),
+            data=csv_buffer.getvalue(),
             file_name=f"{output_filename_base}.csv",
-            mime="text/csv",
+            mime=mime_type,
             key="download_csv"
         )
 else:
